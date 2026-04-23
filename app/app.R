@@ -1,12 +1,14 @@
-library(shiny)
-library(bslib)
-library(DBI)
-library(duckdb)
-library(dplyr)
-library(plotly)
-library(DT)
-library(glue)
-library(htmltools)
+
+packages <- c("DBI", "duckdb", "shiny", "bslib", "dplyr", "plotly","DT", "glue", "htmltools","shinybusy")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+cat("Packages chargés :", paste(packages, collapse = ", "), "\n")
 
 `%||%` <- function(x, y) if (is.null(x) || length(x) == 0 || is.na(x) || x == "") y else x
 
@@ -58,24 +60,63 @@ setup_duckdb_connection <- function(dbdir = "jocas.duckdb") {
   
   DBI::dbExecute(con, "
     CREATE OR REPLACE VIEW jocas_clean AS
+    WITH base AS (
+      SELECT
+        *,
+        CASE
+          WHEN location_departement IN (
+            '01','02','03','04','05','06','07','08','09',
+            '10','11','12','13','14','15','16','17','18','19',
+            '2A','2B',
+            '21','22','23','24','25','26','27','28','29',
+            '30','31','32','33','34','35','36','37','38','39',
+            '40','41','42','43','44','45','46','47','48','49',
+            '50','51','52','53','54','55','56','57','58','59',
+            '60','61','62','63','64','65','66','67','68','69',
+            '70','71','72','73','74','75','76','77','78','79',
+            '80','81','82','83','84','85','86','87','88','89',
+            '90','91','92','93','94','95','971','972','973','974','975','976'
+          )
+            THEN location_departement
+          
+          WHEN regexp_matches(location_zipcode, '^97[1-6][0-9]{2}$')
+            THEN SUBSTR(location_zipcode, 1, 3)
+          
+          WHEN regexp_matches(location_zipcode, '^[0-9]{5}$')
+            THEN SUBSTR(location_zipcode, 1, 2)
+          
+          ELSE NULL
+        END AS departement_tmp
+      FROM jocas
+    )
     SELECT
       *,
       CASE
-        WHEN regexp_matches(location_departement, '^([0-9]{2}|2A|2B|97[1-6])$')
-          THEN location_departement
-        WHEN regexp_matches(location_zipcode, '^97[1-6][0-9]{2}$')
-          THEN SUBSTR(location_zipcode, 1, 3)
-        WHEN regexp_matches(location_zipcode, '^[0-9]{5}$')
-          THEN SUBSTR(location_zipcode, 1, 2)
+        WHEN departement_tmp IN (
+          '01','02','03','04','05','06','07','08','09',
+          '10','11','12','13','14','15','16','17','18','19',
+          '2A','2B',
+          '21','22','23','24','25','26','27','28','29',
+          '30','31','32','33','34','35','36','37','38','39',
+          '40','41','42','43','44','45','46','47','48','49',
+          '50','51','52','53','54','55','56','57','58','59',
+          '60','61','62','63','64','65','66','67','68','69',
+          '70','71','72','73','74','75','76','77','78','79',
+          '80','81','82','83','84','85','86','87','88','89',
+          '90','91','92','93','94','95','971','972','973','974','975','976'
+        )
+          THEN departement_tmp
         ELSE NULL
       END AS departement_clean
-    FROM jocas
+    FROM base
   ")
   
   cat("[setup_duckdb_connection] vues prêtes\n")
   
   con
 }
+
+
 get_choices <- function(con) {
   annees <- DBI::dbGetQuery(con, "
     SELECT DISTINCT annee
@@ -94,9 +135,13 @@ get_choices <- function(con) {
     SELECT DISTINCT departement_clean
     FROM jocas_clean
     WHERE departement_clean IS NOT NULL
-      AND departement_clean <> ''
     ORDER BY departement_clean
   ")$departement_clean
+  
+  cat("[get_choices] nb années =", length(annees), "\n")
+  cat("[get_choices] nb contrats =", length(contrats), "\n")
+  cat("[get_choices] nb départements propres =", length(departements), "\n")
+  print(departements)
   
   list(
     annees = annees,
@@ -104,6 +149,7 @@ get_choices <- function(con) {
     departements = departements
   )
 }
+
 
 sql_escape_like <- function(x) {
   x <- gsub("'", "''", x, fixed = TRUE)
@@ -119,7 +165,7 @@ build_where_clause <- function(input) {
   
   if (nzchar(input$departement %||% "")) {
     dep <- gsub("'", "''", input$departement)
-    clauses <- c(clauses, sprintf("location_departement = '%s'", dep))
+    clauses <- c(clauses, sprintf("departement_clean = '%s'", dep))
   }
   
   if (nzchar(input$contrat %||% "")) {
@@ -185,6 +231,7 @@ chip <- function(text, class = "chip") {
 
 ui <- fluidPage(
   theme = bs_theme(version = 5, bootswatch = "flatly"),
+  use_busy_spinner(),
   tags$head(
     
     tags$script(HTML("
@@ -195,20 +242,101 @@ ui <- fluidPage(
     }
   });
 ")),
-    
-    tags$style(HTML("
-      :root {
-        --app-bg: #f6f8fc;
-        --card-bg: #ffffff;
-        --border: #e5e7eb;
-        --primary: #3158b8;
-        --primary-soft: #eef3ff;
-        --text: #172033;
-        --muted: #697386;
-        --danger: #ef4444;
-      }
+    tags$script(HTML("
+  window.addEventListener('load', function() {
+    const saved = localStorage.getItem('darkMode');
 
-      body {
+    if (saved === null || saved === 'true') {
+      document.body.classList.add('dark');
+      localStorage.setItem('darkMode', 'true');
+    }
+  });
+
+  Shiny.addCustomMessageHandler('toggle-dark', function(x) {
+    document.body.classList.toggle('dark');
+    localStorage.setItem('darkMode', document.body.classList.contains('dark'));
+  });
+
+  $(document).on('keydown', '#title_query, #desc_query', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      $('#search_btn').click();
+    }
+  });
+"))
+    ,
+    tags$style(HTML("
+:root {
+  --app-bg: #f6f8fc;
+  --card-bg: #ffffff;
+  --border: #e5e7eb;
+  --primary: #3158b8;
+  --primary-soft: #eef3ff;
+  --text: #172033;
+  --muted: #697386;
+  --danger: #ef4444;
+  --sidebar-bg: #ffffff;
+  --input-bg: #ffffff;
+  --tab-bg: transparent;
+}
+
+body.dark {
+  --app-bg: #0f172a;
+  --card-bg: #1e293b;
+  --border: #334155;
+  --primary: #60a5fa;
+  --primary-soft: #1e3a5f;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --danger: #f87171;
+  --sidebar-bg: #111827;
+  --input-bg: #1e293b;
+  --tab-bg: transparent;
+}
+input, select, textarea {
+  background: var(--input-bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
+
+.form-control, .selectize-input, .selectize-dropdown, .dropdown-menu {
+  background: var(--input-bg) !important;
+  color: var(--text) !important;
+  border-color: var(--border) !important;
+}
+
+.selectize-dropdown-content .option {
+  background: var(--input-bg);
+  color: var(--text);
+}
+
+.nav-tabs > li > a {
+  color: var(--muted) !important;
+  background: var(--tab-bg) !important;
+}
+
+.nav-tabs > li.active > a,
+.nav-tabs > li.active > a:hover,
+.nav-tabs > li.active > a:focus {
+  color: var(--primary) !important;
+  background: var(--card-bg) !important;
+  border-color: var(--border) !important;
+}
+
+.dataTables_wrapper,
+table.dataTable,
+table.dataTable tbody tr,
+table.dataTable thead th {
+  background: var(--card-bg) !important;
+  color: var(--text) !important;
+}
+
+.shiny-input-radiogroup label,
+.control-label {
+  color: var(--text) !important;
+}
+      body, .container-fluid {
+
         background: var(--app-bg);
         color: var(--text);
       }
@@ -221,8 +349,8 @@ ui <- fluidPage(
 
       .sidebar {
         width: 290px;
-        background: #fff;
-        border-right: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  border-right: 1px solid var(--border);
         display: flex;
         flex-direction: column;
         flex-shrink: 0;
@@ -290,8 +418,8 @@ ui <- fluidPage(
 
       .search-panel {
         flex: 1;
-        background: #fff;
-        border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
         border-radius: 16px;
         padding: 12px;
       }
@@ -316,8 +444,8 @@ ui <- fluidPage(
       }
 
       .filter-summary {
-        background: #fff;
-        border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
         border-radius: 14px;
         padding: 10px 12px;
         display: flex;
@@ -347,8 +475,8 @@ ui <- fluidPage(
       }
 
       .metric-card {
-        background: #fff;
-        border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
         border-radius: 16px;
         padding: 16px;
       }
@@ -369,14 +497,14 @@ ui <- fluidPage(
       }
 
       .card-block {
-        background: #fff;
-        border: 1px solid var(--border);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
         border-radius: 18px;
         padding: 22px;
       }
 
       .text-summary {
-        background: #fff;
+        background: var(--sidebar-bg);
         border: 1px solid var(--border);
         border-radius: 16px;
         padding: 16px 18px;
@@ -384,7 +512,7 @@ ui <- fluidPage(
       }
 
       .panel-card {
-        background: #fff;
+        background: var(--sidebar-bg);
         border: 1px solid var(--border);
         border-radius: 18px;
         padding: 18px;
@@ -546,7 +674,8 @@ ui <- fluidPage(
           ),
           div(
             class = "search-subrow",
-            actionButton("clear_search", "Effacer la recherche")
+            actionButton("clear_search", "Effacer la recherche"),
+            actionButton("toggle_dark", "🌙", class = "btn-primary-custom")
           )
         )
       ),
@@ -632,11 +761,8 @@ server <- function(input, output, session) {
     choices = NULL,
     error = NULL
   )
- 
   
-  cat('--- DEBUG DEPARTEMENTS ---\n')
-  print(head(debug_dep, 50))
-  cat('Nombre brut de codes département distincts :', nrow(debug_dep), '\n')
+  
   observe({
     creds <- check_s3_credentials()
     if (!creds$ok) {
@@ -645,6 +771,12 @@ server <- function(input, output, session) {
     }
     
     if (is.null(state$con)) {
+      shiny::withReactiveDomain(session, {
+        shinybusy::show_modal_spinner(
+          text = "Chargement de JOCAS en cours..."
+        )
+      })
+      
       tryCatch({
         state$con <- setup_duckdb_connection()
         state$choices <- get_choices(state$con)
@@ -667,23 +799,41 @@ server <- function(input, output, session) {
         state$error <- NULL
       }, error = function(e) {
         state$error <- paste("Erreur lors de l'initialisation :", conditionMessage(e))
+      }, finally = {
+        shinybusy::remove_modal_spinner()
       })
     }
   })
   
   search_trigger <- reactiveVal(0)
   
-  observeEvent(input$apply_filters, {
-    cat("[apply_filters] clic\n")
-    search_trigger(search_trigger() + 1)
-  })
-  
+
   observeEvent(input$search_btn, {
+    shiny::withReactiveDomain(session, {
+      shinybusy::show_modal_spinner(
+        text = "Recherche textuelle dans les offres en cours..."
+      )
+    })
     cat("[search_btn] clic\n")
     search_trigger(search_trigger() + 1)
   })
   
+  observeEvent(input$apply_filters, {
+    shiny::withReactiveDomain(session, {
+      shinybusy::show_modal_spinner(
+        text = "Application des filtres en cours..."
+      )
+    })
+    cat("[apply_filters] clic\n")
+    search_trigger(search_trigger() + 1)
+  })
+  
   observeEvent(input$clear_search, {
+    shiny::withReactiveDomain(session, {
+      shinybusy::show_modal_spinner(
+        text = "Réinitialisation de la recherche..."
+      )
+    })
     cat("[clear_search] clic\n")
     updateTextInput(session, "title_query", value = "")
     updateTextInput(session, "desc_query", value = "")
@@ -692,6 +842,11 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$reset_filters, {
+    shiny::withReactiveDomain(session, {
+      shinybusy::show_modal_spinner(
+        text = "Réinitialisation des filtres..."
+      )
+    })
     cat("[reset_filters] clic\n")
     updateSelectInput(session, "region", selected = "")
     updateSelectInput(session, "departement", selected = "")
@@ -702,6 +857,8 @@ server <- function(input, output, session) {
     updateRadioButtons(session, "whole_word", selected = "false")
     search_trigger(search_trigger() + 1)
   })
+
+
   
   active_filters <- reactive({
     list(
@@ -714,42 +871,43 @@ server <- function(input, output, session) {
     )
   })
   
-  observeEvent(input$clear_search, {
-    updateTextInput(session, "title_query", value = "")
-    updateTextInput(session, "desc_query", value = "")
-    updateRadioButtons(session, "whole_word", selected = "false")
-  })
-  
-  observeEvent(input$reset_filters, {
-    updateSelectInput(session, "region", selected = "")
-    updateSelectInput(session, "departement", selected = "")
-    updateSelectInput(session, "annee", selected = "")
-    updateSelectInput(session, "contrat", selected = "")
-    updateTextInput(session, "title_query", value = "")
-    updateTextInput(session, "desc_query", value = "")
-    updateRadioButtons(session, "whole_word", selected = "false")
-  })
-  
+
   query_metrics <- eventReactive(search_trigger(), {
     req(state$con)
+    
+    shiny::withReactiveDomain(session, {
+      shinybusy::show_modal_spinner(
+        text = "Calcul des indicateurs JOCAS en cours..."
+      )
+    })
+    
     where_clause <- build_where_clause(input)
     
     sql <- glue("
-      SELECT
-        COUNT(*) AS total_offres,
-        COUNT(DISTINCT location_departement) AS departements_couverts,
-        COUNT(DISTINCT entreprise_nom) AS total_entreprises,
-        AVG(
-          CASE
-            WHEN TRY_CAST(salary_value AS DOUBLE) IS NOT NULL THEN TRY_CAST(salary_value AS DOUBLE)
-            ELSE NULL
-          END
-        ) AS salaire_moyen
-      FROM jocas
-      {where_clause}
-    ")
+    SELECT
+      COUNT(*) AS total_offres,
+      COUNT(DISTINCT departement_clean) AS departements_couverts,
+      COUNT(DISTINCT entreprise_nom) AS total_entreprises,
+      AVG(
+        CASE
+          WHEN TRY_CAST(salary_value AS DOUBLE) IS NOT NULL
+            THEN TRY_CAST(salary_value AS DOUBLE)
+          ELSE NULL
+        END
+      ) AS salaire_moyen
+    FROM jocas_clean
+    {where_clause}
+  ")
     
-    DBI::dbGetQuery(state$con, sql)
+    cat('[query_metrics] SQL =\n')
+    cat(sql, '\n')
+    
+    res <- DBI::dbGetQuery(state$con, sql)
+    print(res)
+    
+    shinybusy::remove_modal_spinner()
+    
+    res
   }, ignoreInit = FALSE)
   
   query_contracts <- eventReactive(search_trigger(), {
@@ -906,7 +1064,9 @@ server <- function(input, output, session) {
       if (!is.null(top_contract)) tags$p(glue("Le type de contrat le plus fréquent est : {top_contract}."), style = "margin-bottom:0;")
     )
   })
-  
+  observeEvent(input$toggle_dark, {
+    session$sendCustomMessage("toggle-dark", list())
+  })
   output$map_tab <- renderUI({
     dep <- tryCatch(
       DBI::dbGetQuery(state$con, glue("
