@@ -1,0 +1,630 @@
+---
+title: "Exploration JOCAS avec Arrow et DuckDB"
+author: "Romuald WEIDMANN"
+date: "`r Sys.Date()`"
+output:
+  html_notebook:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: cosmo
+    code_folding: hide
+editor_options:
+  chunk_output_type: console
+---
+
+# Notebook — Exploration JOCAS avec DuckDB
+
+## Contexte et sources
+
+**JOCAS** (*Job Offers Collection and Analysis System*) est une base de données construite par la **Dares** à partir des offres d’emploi en ligne publiées sur les principaux sites de recrutement en France. La Dares indique qu’elle collecte ces offres **depuis 2019** afin d’en faire une base dédiée à l’analyse du marché du travail.
+
+Cette base est mobilisée dans des travaux d’analyse sur les offres d’emploi en ligne, les tensions du marché du travail et, plus largement, l’observation infra-annuelle des dynamiques de recrutement.
+
+Dans l’environnement SSPCloud, une application JOCAS est également accessible via l’interface **JOCAS - Marché du Travail**. Un dépôt GitLab SSPCloud dédié à l’analyse JOCAS existe également.
+
+### Références utiles
+
+- **Source institutionnelle Dares — page JOCAS** : https://dares.travail-emploi.gouv.fr/enquete-source/jocas
+- **Application SSPCloud “JOCAS - Marché du Travail”** : https://jocas-v3.user.lab.sspcloud.fr/
+- **Dépôt GitLab SSPCloud de l’application d’analyse JOCAS** : https://git.lab.sspcloud.fr/baali/analyse-jocas-app/-/tree/main?ref_type=heads
+
+---
+
+## 1. Installation et chargement des packages
+
+```{r}
+packages <- c("DBI", "duckdb")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg)
+  }
+  library(pkg, character.only = TRUE)
+}
+
+cat("Packages chargés :", paste(packages, collapse = ", "), "\n")
+```
+
+---
+
+## 2. Principe de travail
+
+On ne charge **pas** tous les fichiers parquet en mémoire.
+
+On crée une **vue logique DuckDB** sur l’ensemble des fichiers JOCAS stockés sur S3 :
+
+* lecture lazy des Parquet
+* récupération automatique des partitions `annee=` et `mois=`
+* unification des colonnes via `union_by_name = true`
+* exécution des requêtes SQL uniquement au moment voulu
+
+---
+
+## 3. Connexion DuckDB
+
+```{r}
+con <- DBI::dbConnect(
+  duckdb::duckdb(),
+  dbdir = "jocas.duckdb"
+)
+
+cat("Connexion DuckDB ouverte\n")
+```
+
+---
+
+## 4. Création de la vue logique JOCAS sur S3
+
+```{r}
+DBI::dbExecute(con, "
+  CREATE OR REPLACE VIEW jocas AS
+  SELECT *
+  FROM read_parquet(
+    's3://projet-jocas-prod/diffusion/JOCAS/**/*.parquet',
+    hive_partitioning = true,
+    union_by_name = true,
+    filename = true
+  )
+")
+
+cat("Vue logique 'jocas' créée sur l'ensemble des fichiers parquet\n")
+```
+
+---
+
+## 5. Inspection rapide
+
+### Tables et vues disponibles
+
+```{r}
+cat("Objets disponibles dans DuckDB :\n")
+print(DBI::dbListTables(con))
+```
+
+### Structure de la vue
+
+```{r}
+desc_jocas <- DBI::dbGetQuery(con, "DESCRIBE jocas")
+
+cat("Structure de la vue jocas :\n")
+print(desc_jocas)
+```
+
+---
+
+## 6. Premières requêtes globales
+
+### Nombre total de lignes
+
+```{r}
+sql_total <- DBI::dbGetQuery(con, "
+  SELECT COUNT(*) AS n
+  FROM jocas
+")
+
+cat(" Nombre total de lignes :\n")
+print(sql_total)
+```
+
+### Nombre de lignes par année
+
+```{r}
+sql_annee <- DBI::dbGetQuery(con, "
+  SELECT annee, COUNT(*) AS n
+  FROM jocas
+  GROUP BY annee
+  ORDER BY annee
+")
+
+cat(" Nombre de lignes par année :\n")
+print(sql_annee)
+```
+
+### Nombre de lignes par année et mois
+
+```{r}
+sql_annee_mois <- DBI::dbGetQuery(con, "
+  SELECT annee, mois, COUNT(*) AS n
+  FROM jocas
+  GROUP BY annee, mois
+  ORDER BY annee, mois
+")
+
+cat("Nombre de lignes par année et mois :\n")
+print(sql_annee_mois)
+```
+
+---
+
+##  7. Extraction ciblée d’un sous-ensemble
+
+### Exemple : 1000 lignes pour octobre 2025
+
+```{r}
+df_test <- DBI::dbGetQuery(con, "
+  SELECT
+    ID_JOCAS,
+    site_name,
+    date_firstSeenDay,
+    job_title,
+    annee,
+    mois
+  FROM jocas
+  WHERE annee = 2025
+    AND mois = 10
+  LIMIT 1000
+")
+
+cat(" Aperçu du sous-ensemble extrait :\n")
+print(head(df_test))
+```
+
+---
+
+## 8. Exemple métier : volume journalier des offres vues en 2025
+
+```{r}
+daily_2025 <- DBI::dbGetQuery(con, "
+  SELECT
+    date_firstSeenDay,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE annee = 2025
+  GROUP BY date_firstSeenDay
+  ORDER BY date_firstSeenDay
+")
+
+cat(" Nombre d'offres par date_firstSeenDay en 2025 :\n")
+print(head(daily_2025, 20))
+```
+
+---
+
+##  9. Exemple métier : principaux sites sources
+
+```{r}
+top_sites <- DBI::dbGetQuery(con, "
+  SELECT
+    site_name,
+    COUNT(*) AS n
+  FROM jocas
+  GROUP BY site_name
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat(" Top 20 des sites sources :\n")
+print(top_sites)
+```
+
+---
+
+## 10. Fonction utilitaire pour lancer des requêtes SQL
+
+```{r}
+query_jocas <- function(sql) {
+  DBI::dbGetQuery(con, sql)
+}
+
+cat("Fonction query_jocas() prête\n")
+```
+
+### Exemple d’utilisation
+
+```{r}
+res <- query_jocas("
+  SELECT annee, mois, COUNT(*) AS n
+  FROM jocas
+  GROUP BY annee, mois
+  ORDER BY annee, mois
+")
+
+print(res)
+```
+
+---
+
+## 11. Notes méthodologiques
+
+* `read_parquet(..., hive_partitioning = true)` permet de récupérer automatiquement les variables de partition comme `annee` et `mois`
+* `union_by_name = true` permet de gérer les différences de schéma entre fichiers parquet
+* les données ne sont **pas intégralement chargées en RAM**
+* DuckDB exécute les requêtes directement sur les fichiers parquet
+* il faut toujours privilégier :
+
+  * les agrégations SQL
+  * les filtres `WHERE`
+  * les `LIMIT`
+  * la sélection explicite des colonnes utiles
+
+---
+
+## 12. Résumé
+
+Ce notebook permet de :
+
+* se connecter à la base JOCAS sans chargement massif en mémoire
+* interroger l’ensemble des fichiers parquet depuis S3
+* produire des agrégats globaux sur plusieurs années
+* extraire des sous-ensembles ciblés
+* travailler sur une base volumineuse de façon scalable
+
+---
+
+## 13. Fermeture de la connexion
+
+```{r}
+# DBI::dbDisconnect(con, shutdown = TRUE)
+# cat("Connexion DuckDB fermée\n")
+```
+
+---
+
+#  14. Analyses métier JOCAS
+
+## 14.1 Évolution temporelle des offres
+
+### Volume mensuel des offres
+
+```{r}
+monthly_trend <- DBI::dbGetQuery(con, "
+  SELECT
+    annee,
+    mois,
+    COUNT(*) AS n
+  FROM jocas
+  GROUP BY annee, mois
+  ORDER BY annee, mois
+")
+
+cat(" Volume mensuel des offres :\n")
+print(head(monthly_trend, 20))
+```
+
+---
+
+### Volume journalier (exemple sur 2025)
+
+```{r}
+daily_trend <- DBI::dbGetQuery(con, "
+  SELECT
+    date_firstSeenDay,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE annee = 2025
+  GROUP BY date_firstSeenDay
+  ORDER BY date_firstSeenDay
+")
+
+cat(" Volume journalier 2025 :\n")
+print(head(daily_trend, 20))
+```
+
+---
+
+## 14.2 Répartition par site source
+
+```{r}
+site_distribution <- DBI::dbGetQuery(con, "
+  SELECT
+    site_name,
+    COUNT(*) AS n
+  FROM jocas
+  GROUP BY site_name
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat("Top 20 des sites sources :\n")
+print(site_distribution)
+```
+
+---
+
+## 14.3 Top métiers (job_title)
+
+Les libellés peuvent être bruités → analyse indicative
+
+```{r}
+top_jobs <- DBI::dbGetQuery(con, "
+  SELECT
+    job_title,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE job_title IS NOT NULL
+  GROUP BY job_title
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat("Top 20 des intitulés de poste :\n")
+print(top_jobs)
+```
+
+---
+
+##  14.4 Répartition géographique
+
+### Par département
+
+```{r}
+geo_dep <- DBI::dbGetQuery(con, "
+  SELECT
+    location_departement,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE location_departement IS NOT NULL
+  GROUP BY location_departement
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat(" Top départements :\n")
+print(geo_dep)
+```
+
+---
+
+### Par code postal
+
+```{r}
+geo_zip <- DBI::dbGetQuery(con, "
+  SELECT
+    location_zipcode,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE location_zipcode IS NOT NULL
+  GROUP BY location_zipcode
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat(" Top codes postaux :\n")
+print(geo_zip)
+```
+
+---
+
+## 14.5 Dynamique des offres (apparition / disparition)
+
+### Nouvelles offres (first seen)
+
+```{r}
+new_offers <- DBI::dbGetQuery(con, "
+  SELECT
+    date_firstSeenDay,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE date_firstSeenDay IS NOT NULL
+  GROUP BY date_firstSeenDay
+  ORDER BY date_firstSeenDay
+")
+
+cat("Nouvelles offres par jour :\n")
+print(head(new_offers, 20))
+```
+
+---
+
+### Offres disparues
+
+```{r}
+disappeared_offers <- DBI::dbGetQuery(con, "
+  SELECT
+    date_firstDisappearedDay,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE date_firstDisappearedDay IS NOT NULL
+  GROUP BY date_firstDisappearedDay
+  ORDER BY date_firstDisappearedDay
+")
+
+cat("Offres disparues par jour :\n")
+print(head(disappeared_offers, 20))
+```
+
+---
+
+### Offres encore actives (proxy simple)
+
+```{r}
+active_offers <- DBI::dbGetQuery(con, "
+  SELECT COUNT(*) AS n
+  FROM jocas
+  WHERE date_lastSeenDay IS NULL
+")
+
+cat("Offres potentiellement actives :\n")
+print(active_offers)
+```
+
+---
+
+## 4.6 Durée de vie des offres (approximation)
+
+```{r}
+lifetime <- DBI::dbGetQuery(con, "
+  SELECT
+    AVG(
+      DATE_DIFF('day',
+        CAST(date_firstSeenDay AS DATE),
+        CAST(date_lastSeenDay AS DATE)
+      )
+    ) AS avg_lifetime_days
+  FROM jocas
+  WHERE date_firstSeenDay IS NOT NULL
+    AND date_lastSeenDay IS NOT NULL
+")
+
+cat("Durée moyenne de vie (jours) :\n")
+print(lifetime)
+```
+
+---
+
+## 14.7 Notes d’interprétation métier
+
+* `date_firstSeenDay` → entrée d’une offre dans JOCAS (nouvelle observation)
+* `date_lastSeenDay` → dernière observation avant disparition
+* `date_firstDisappearedDay` → disparition constatée
+
+Important :
+
+* les fichiers journaliers récents peuvent être **incrémentaux**
+* certaines journées contiennent uniquement des **diffs (delta)** et non un stock complet
+* il faut donc privilégier :
+
+  * des agrégations globales
+  * ou reconstruire des stocks via logique temporelle avancée
+
+---
+
+Voici le bloc complémentaire à ajouter :
+
+##  14.8 Analyse par secteur NAF
+
+### Répartition par secteur NAF88
+
+```{r}
+naf88_distribution <- DBI::dbGetQuery(con, "
+  SELECT
+    entrepriseSecteur_NAF88,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE entrepriseSecteur_NAF88 IS NOT NULL
+  GROUP BY entrepriseSecteur_NAF88
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat(" Top 20 des secteurs NAF88 :\n")
+print(naf88_distribution)
+```
+
+---
+
+### Répartition par secteur NAF21
+
+```{r}
+naf21_distribution <- DBI::dbGetQuery(con, "
+  SELECT
+    entrepriseSecteur_NAF21,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE entrepriseSecteur_NAF21 IS NOT NULL
+  GROUP BY entrepriseSecteur_NAF21
+  ORDER BY n DESC
+  LIMIT 20
+")
+
+cat(" Top 20 des secteurs NAF21 :\n")
+print(naf21_distribution)
+```
+
+---
+
+### Croisement secteur × année
+
+```{r}
+naf_year <- DBI::dbGetQuery(con, "
+  SELECT
+    annee,
+    entrepriseSecteur_NAF88,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE entrepriseSecteur_NAF88 IS NOT NULL
+  GROUP BY annee, entrepriseSecteur_NAF88
+  ORDER BY annee, n DESC
+")
+
+cat(" Répartition annuelle par secteur NAF88 :\n")
+print(head(naf_year, 30))
+```
+
+---
+
+##  14.9 Cartographie territoriale
+
+### Répartition des offres par département
+
+```{r}
+map_dep <- DBI::dbGetQuery(con, "
+  SELECT
+    location_departement,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE location_departement IS NOT NULL
+  GROUP BY location_departement
+  ORDER BY n DESC
+")
+
+cat(" Répartition des offres par département :\n")
+print(head(map_dep, 30))
+```
+
+---
+
+### Répartition des offres par code postal
+
+```{r}
+map_zip <- DBI::dbGetQuery(con, "
+  SELECT
+    location_zipcode,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE location_zipcode IS NOT NULL
+  GROUP BY location_zipcode
+  ORDER BY n DESC
+")
+
+cat(" Répartition des offres par code postal :\n")
+print(head(map_zip, 30))
+```
+
+---
+
+### Répartition des offres par libellé de localisation
+
+```{r}
+map_label <- DBI::dbGetQuery(con, "
+  SELECT
+    location_label,
+    COUNT(*) AS n
+  FROM jocas
+  WHERE location_label IS NOT NULL
+  GROUP BY location_label
+  ORDER BY n DESC
+  LIMIT 50
+")
+
+cat(" Top localisations :\n")
+print(map_label)
+```
+
+---
+
+```{r}
+DBI::dbDisconnect(con, shutdown = TRUE)
+cat("Connexion DuckDB fermée\n")
+```
