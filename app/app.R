@@ -367,7 +367,7 @@ build_where_clause <- function(input, refs = NULL) {
       clauses <- c(clauses, sprintf("job_ROME_code IN (%s)", code_sql))
     }
   }
-  
+
   title_query <- trimws(input$title_query %||% "")
   if (nzchar(title_query)) {
     q <- sql_escape_like(title_query)
@@ -728,16 +728,17 @@ ui <- fluidPage(
         border-bottom: 2px solid var(--primary);
         background: var(--card-bg) !important;
       }
-
-      input, select, textarea,
-      .form-control,
-      .selectize-input,
-      .selectize-dropdown,
-      .dropdown-menu {
-        background: var(--input-bg) !important;
-        color: var(--text) !important;
-        border: 1px solid var(--border) !important;
-      }
+input:not([type='radio']):not([type='checkbox']),
+select,
+textarea,
+.form-control,
+.selectize-input,
+.selectize-dropdown,
+.dropdown-menu {
+  background: var(--input-bg) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+}
 
       .selectize-dropdown-content .option,
       .dropdown-menu > li > a {
@@ -832,6 +833,91 @@ body.dark .modal-backdrop.in {
 .leaflet-container a {
   color: #e2e8f0 !important;
 }
+
+/* radios Partiel / Entier */
+.shiny-options-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.radio-inline,
+.radio-inline label,
+.radio label,
+.shiny-options-group label {
+  color: var(--text) !important;
+  font-weight: 600 !important;
+}
+
+.radio-inline + .radio-inline {
+  margin-left: 14px !important;
+}
+
+.radio-inline input[type='radio'],
+.radio input[type='radio'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  background: transparent;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+  margin-top: 0;
+  position: relative;
+  cursor: pointer;
+}
+
+.radio-inline input[type='radio']:checked,
+.radio input[type='radio']:checked {
+  border-color: var(--primary);
+  background: radial-gradient(circle at center, var(--primary) 0 38%, transparent 42%);
+}
+
+.radio-inline input[type='radio']:focus,
+.radio input[type='radio']:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(49, 88, 184, 0.18);
+}
+
+body.dark .radio-inline input[type='radio'],
+body.dark .radio input[type='radio'] {
+  border-color: #64748b;
+}
+
+body.dark .radio-inline input[type='radio']:checked,
+body.dark .radio input[type='radio']:checked {
+  border-color: #60a5fa;
+  background: radial-gradient(circle at center, #60a5fa 0 38%, transparent 42%);
+}
+
+/* placeholder inputs en mode sombre */
+body.dark input::placeholder,
+body.dark textarea::placeholder,
+body.dark .form-control::placeholder {
+  color: #94a3b8 !important;
+  opacity: 1 !important;
+}
+
+body.dark input::-webkit-input-placeholder,
+body.dark textarea::-webkit-input-placeholder,
+body.dark .form-control::-webkit-input-placeholder {
+  color: #94a3b8 !important;
+}
+
+body.dark input:-ms-input-placeholder,
+body.dark textarea:-ms-input-placeholder,
+body.dark .form-control:-ms-input-placeholder {
+  color: #94a3b8 !important;
+}
+
+body.dark input::-ms-input-placeholder,
+body.dark textarea::-ms-input-placeholder,
+body.dark .form-control::-ms-input-placeholder {
+  color: #94a3b8 !important;
+}
     "))
   ),
   
@@ -840,7 +926,7 @@ body.dark .modal-backdrop.in {
     
     div(
       class = "sidebar",
-      div(class = "sidebar-header", "JOCAS DataViz"),
+      div(class = "sidebar-header", "EDEP – JOCAS Explorer"),
       
       div(
         class = "sidebar-section",
@@ -886,14 +972,14 @@ body.dark .modal-backdrop.in {
       div(
         class = "topbar-row",
         
-        div(
-          class = "brand-block",
-          div(class = "brand-logo"),
-          div(
-            div(class = "brand-title", "JOCAS DataViz"),
-            div(class = "brand-subtitle", "Marché du Travail")
-          )
-        ),
+        # div(
+        #   class = "brand-block",
+        #   div(class = "brand-logo"),
+        #   div(
+        #     div(class = "brand-title", "EDEP – JOCAS Explorer"),
+        #     div(class = "brand-subtitle", "Marché du Travail")
+        #   )
+        # ),
         
         div(
           class = "search-panel",
@@ -901,11 +987,14 @@ body.dark .modal-backdrop.in {
             class = "search-grid",
             textInput("title_query", NULL, placeholder = "Titre du poste..."),
             textInput("desc_query", NULL, placeholder = "Mots-clés dans la description..."),
-            radioButtons(
-              "whole_word", NULL,
-              choices = c("Partiel" = "false", "Entier" = "true"),
-              selected = "false",
-              inline = TRUE
+            div(
+              style = "display:flex; align-items:center; padding-top:6px;",
+              radioButtons(
+                "whole_word", NULL,
+                choices = c("Partiel" = "false", "Entier" = "true"),
+                selected = "false",
+                inline = TRUE
+              )
             ),
             actionButton("search_btn", "Rechercher", class = "btn-primary-custom")
           ),
@@ -934,7 +1023,7 @@ body.dark .modal-backdrop.in {
             div(
               class = "card-block",
               tags$div(style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em;", "Tableau de bord"),
-              tags$h1("JOCAS DataViz"),
+              tags$h1("EDEP – JOCAS Explorer"),
               tags$p(
                 "Ce tableau de bord vous permet d'explorer ",
                 tags$strong("67 millions d'offres d'emploi"),
@@ -1001,7 +1090,205 @@ body.dark .modal-backdrop.in {
         ),
         tabPanel("Statistiques", div(class = "tab-content", uiOutput("stats_tab"))),
         tabPanel("Données", div(class = "tab-content", uiOutput("data_tab"))),
-        tabPanel("Export", div(class = "tab-content", uiOutput("export_tab")))
+        tabPanel("Export", div(class = "tab-content", uiOutput("export_tab"))),
+        tabPanel(
+          "À propos",
+          div(
+            class = "tab-content",
+            
+            div(
+              class = "welcome-grid",
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Projet"
+                ),
+                tags$h3("EDEP – JOCAS Explorer"),
+                tags$p(
+                  "Cette application a été développée par l'équipe ",
+                  tags$strong("EDEP"),
+                  " pour faciliter l’exploration, l’analyse et la valorisation des données issues du système ",
+                  tags$strong("JOCAS"),
+                  "."
+                ),
+                tags$p(
+                  "L’objectif est de proposer une interface simple pour explorer les offres d’emploi, ",
+                  "suivre leur répartition territoriale, analyser leur dynamique temporelle ",
+                  "et documenter les principaux usages du projet."
+                )
+              ),
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Source des données"
+                ),
+                tags$h3("Référentiel JOCAS"),
+                tags$p(
+                  tags$strong("JOCAS"),
+                  " (Job Offers Collection and Analysis System) est un dispositif de la ",
+                  tags$strong("Dares"),
+                  " dédié à la collecte et à l’analyse des offres d’emploi en France."
+                ),
+                tags$p(
+                  "L’application EDEP s’appuie sur ces données pour proposer une lecture opérationnelle ",
+                  "et exploratoire du marché du travail."
+                )
+              )
+            ),
+            
+            tags$div(style = "height:18px;"),
+            
+            div(
+              class = "panel-card",
+              tags$div(
+                style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                "Références et liens utiles"
+              ),
+              
+              tags$h4("Sources institutionnelles"),
+              tags$ul(
+                tags$li(
+                  "Source institutionnelle Dares — page JOCAS : ",
+                  tags$a(
+                    href = "https://dares.travail-emploi.gouv.fr/enquete-source/jocas",
+                    target = "_blank",
+                    "Voir la page"
+                  )
+                ),
+                tags$li(
+                  "Application SSPCloud “JOCAS - Marché du Travail” : ",
+                  tags$a(
+                    href = "https://jocas-v3.user.lab.sspcloud.fr/",
+                    target = "_blank",
+                    "Accéder à l'application"
+                  )
+                ),
+                tags$li(
+                  "Dépôt GitLab SSPCloud de l’application d’analyse JOCAS : ",
+                  tags$a(
+                    href = "https://git.lab.sspcloud.fr/baali/v3-deploy",
+                    target = "_blank",
+                    "Voir le dépôt"
+                  )
+                )
+              )
+            ),
+            
+            tags$div(style = "height:18px;"),
+            
+            div(
+              class = "welcome-grid",
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Application EDEP"
+                ),
+                tags$h4("Dépôt de l'application"),
+                tags$p(
+                  "Ce bloc peut documenter le dépôt principal de développement de l’application EDEP."
+                ),
+                tags$ul(
+                  tags$li("Nom du dépôt : à compléter"),
+                  tags$li(
+                    "Lien GitLab / GitHub : ",
+                    tags$em("à renseigner")
+                  )
+                ),
+                tags$p(
+                  style = "color:var(--muted); margin-bottom:0;",
+                  "À utiliser pour documenter le code source fonctionnel de l’application."
+                )
+              ),
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Déploiement"
+                ),
+                tags$h4("Dépôt de déploiement"),
+                tags$p(
+                  "Ce bloc peut documenter le dépôt ou la chaîne de déploiement de l’application."
+                ),
+                tags$ul(
+                  tags$li("Nom du dépôt de déploiement : à compléter"),
+                  tags$li(
+                    "Lien GitLab / GitHub : ",
+                    tags$em("à renseigner")
+                  ),
+                  tags$li("Environnement cible : SSPCloud / autre environnement à préciser")
+                ),
+                tags$p(
+                  style = "color:var(--muted); margin-bottom:0;",
+                  "À utiliser pour distinguer le code applicatif du code d’infrastructure ou de mise en production."
+                )
+              )
+            ),
+            
+            tags$div(style = "height:18px;"),
+            
+            div(
+              class = "welcome-grid",
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Méthodologie"
+                ),
+                tags$h4("Principes de fonctionnement"),
+                tags$ul(
+                  tags$li("Exploration des offres via filtres territoriaux, temporels et métier."),
+                  tags$li("Recherche textuelle sur les intitulés et descriptions."),
+                  tags$li("Agrégations calculées à la volée via DuckDB."),
+                  tags$li("Visualisations synthétiques : indicateurs, graphiques, carte, extraction tabulaire.")
+                )
+              ),
+              
+              div(
+                class = "panel-card",
+                tags$div(
+                  style = "font-size:12px; font-weight:700; color:#d9480f; text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                  "Limites"
+                ),
+                tags$h4("Points d'attention"),
+                tags$ul(
+                  tags$li("Les données ne couvrent pas l’intégralité du marché du travail."),
+                  tags$li("La qualité de la recherche dépend des intitulés et descriptions disponibles."),
+                  tags$li("Les salaires ne concernent que les offres renseignant une rémunération."),
+                  tags$li("Les regroupements métiers et familles ROME reposent sur les référentiels chargés dans l’application.")
+                )
+              )
+            ),
+            
+            tags$div(style = "height:18px;"),
+            
+            div(
+              class = "panel-card",
+              tags$div(
+                style = "font-size:12px; font-weight:700; color:var(--primary); text-transform:uppercase; letter-spacing:.08em; margin-bottom:18px;",
+                "Contacts / maintenance"
+              ),
+              tags$p(
+                "Ce bloc peut être utilisé pour indiquer le responsable applicatif, l’équipe projet, ",
+                "ou les modalités de maintenance et d’évolution."
+              ),
+              tags$ul(
+                tags$li("Équipe : EDEP"),
+                tags$li("Référent fonctionnel : à compléter"),
+                tags$li("Référent technique : à compléter"),
+                tags$li("Canal de suivi / ticketing : à compléter")
+              )
+            )
+          )
+        )
+          
       )
     )
   )
@@ -1018,7 +1305,9 @@ server <- function(input, output, session) {
     refs = NULL,
     error = NULL
   )
-  
+  observe({
+    cat("[DEBUG whole_word] valeur =", input$whole_word, "\n")
+  })
   observe({
     creds <- check_s3_credentials()
     if (!creds$ok) {
