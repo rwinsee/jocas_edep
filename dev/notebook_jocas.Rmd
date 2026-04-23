@@ -27,7 +27,7 @@ Dans l’environnement SSPCloud, une application JOCAS est également accessible
 
 - **Source institutionnelle Dares — page JOCAS** : https://dares.travail-emploi.gouv.fr/enquete-source/jocas
 - **Application SSPCloud “JOCAS - Marché du Travail”** : https://jocas-v3.user.lab.sspcloud.fr/
-- **Dépôt GitLab SSPCloud de l’application d’analyse JOCAS** : https://git.lab.sspcloud.fr/baali/analyse-jocas-app/-/tree/main?ref_type=heads
+- **Dépôt GitLab SSPCloud de l’application d’analyse JOCAS** : https://git.lab.sspcloud.fr/baali/v3-deploy
 
 ---
 
